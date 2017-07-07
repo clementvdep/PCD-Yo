@@ -1,0 +1,153 @@
+---
+title: "PCD transcriptomic analysis"
+author: "Clement Vialatte de Pemille"
+date: "21 juin 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+setwd("/home/clement.vialatte/Documents/RawData_E16_053/")
+```
+
+```{r, echo=F}
+library(RColorBrewer)
+cols <- brewer.pal(9, "Set1")
+```
+
+```{r, echo=TRUE, message=F}
+# Downloading, normalizing and plotting the data
+
+library(pd.hta.2.0)
+library(oligo)
+celFiles <- list.celfiles()
+affyRaw <- read.celfiles(celFiles)
+eset <- rma(affyRaw)
+boxplot(eset, col=cols)
+hist(eset, col=cols)
+
+fit <- fitProbeLevelModel(affyRaw)
+NUSE(fit, las = 2, cex.axis = 0.35)
+RLE(fit, las = 2, cex.axis = 0.35)
+```
+
+```{r, message=F, echo=T}
+# Annotating the expression set
+
+library(hta20sttranscriptcluster.db)
+my_frame <- data.frame(exprs(eset))
+x <- hta20sttranscriptclusterSYMBOL
+mapped_probes <- mappedkeys(x)
+xx <- as.list(x[mapped_probes])
+universe <- unlist(xx)
+write.table(universe, 'universe.txt', quote =F, sep ='\t',col.names = F, row.names = T)
+universe2<-read.table("universe.txt", header = FALSE)
+rownames(universe2)<-universe2[,1]
+eset_array<-merge(universe2, my_frame, by=0)
+```
+
+```{r, echo=F, message=F}
+eset_array<-as.matrix(eset_array)
+rownames(eset_array)<-eset_array[,3]
+eset_array<-eset_array[,-c(1:3)]
+eset_array2<-as.numeric(eset_array)
+eset_array2<-matrix(eset_array2, nrow = 30682, ncol = 12, byrow = F)
+rownames(eset_array2)<-rownames(eset_array)
+colnames(eset_array2)<-colnames(eset_array)
+eset_array<-eset_array2
+library(Matrix.utils)
+eset_array <- aggregate.Matrix(eset_array, row.names(eset_array), fun="mean")
+eset_array<-as.matrix(eset_array)
+```
+
+```{r, echo=T}
+dim(eset_array)
+```
+
+```{r, echo=T, message=F}
+# Plotting raw images and scatter plots
+library(affy)
+par(mfrow=c(2,6))
+image(affyRaw[,1])
+image(affyRaw[,2])
+image(affyRaw[,3])
+image(affyRaw[,4])
+image(affyRaw[,5])
+image(affyRaw[,6])
+image(affyRaw[,7])
+image(affyRaw[,8])
+image(affyRaw[,9])
+image(affyRaw[,10])
+image(affyRaw[,11])
+image(affyRaw[,12])
+
+par(mfrow=c(1,1))
+pairs(exprs(eset)[,1:6], pch=".",main="Scatter plots",col=cols) 
+pairs(exprs(eset)[,7:12], pch=".",main="Scatter plots",col=cols) 
+mva.pairs(exprs(eset)[,1:6],,col=cols,cex = 0.5)
+mva.pairs(exprs(eset)[,7:12],,col=cols,cex = 0.5)
+```
+
+```{r, echo=T, message=F}
+### Data clustering
+library(ConsensusClusterPlus)
+
+# Select the 5000 most variable probes with median absolute distance
+eset_array2<-apply(eset_array,1,mad)
+eset_array2<-eset_array[rev(order(eset_array2))[1:5000],]
+
+# Agglomerative heirarchical clustering using Pearson correlation distance
+eset_array2 <- sweep(eset_array2,1, apply(eset_array2,1,median,na.rm=T))
+
+cluster <- ConsensusClusterPlus(eset_array2,
+                                maxK=4,
+                                reps=1000,
+                                pItem=0.8,
+                                pFeature=1,
+                                title="consensus cluster",
+                                clusterAlg="hc",
+                                distance="pearson")
+
+# Plots
+icl = calcICL(cluster,title="cluster") 
+
+# Retreive information for k=2 (most informative clusterisation)
+cluster[[2]][["consensusClass"]]
+```
+
+```{r, echo=T, message=F}
+### Statistical analysis with linear regression
+library(limma)
+```
+
+```{r, echo=F}
+design<-data.frame(cluster2=c(0,0,1,1,0,0,1,1,0,1,1,1), cluster1=c(1,1,0,0,1,1,0,0,1,0,0,0), row.names=c(1:12))
+design<-as.matrix(design)
+```
+
+```{r, echo=T}
+fit <- lmFit(eset_array, design)
+cont.matrix <- makeContrasts(cluster1vscluster2=cluster1-cluster2, levels=design) 
+fit <- contrasts.fit(fit, cont.matrix)
+fit <- eBayes(fit)
+dim(topTable(fit, number = "inf", p.value = 0.05))
+```
+
+```{r, echo=F, message=F}
+library(calibrate)
+DE_gene2<-toptable(fit, number = "inf", p.value = 0.05)
+DE_gene3<-toptable(fit, number = "inf")
+DE_gene3$log2p<-c(-log2(DE_gene3$adj.P.Val))
+setwd("/home/clement.vialatte/Documents/Arrayexrps/Pathway analysis 5 datasets/")
+Lit<-read.csv2("DEgene_FF_FFPE", header = F)
+
+par(mfrow=c(1,1))
+with(DE_gene3, plot(logFC, log2p, pch=20, main="Differential gene expression in PCD ovarian tumor with anti-Yo", xlab="Log Fold Change", ylab="-log2(p-value)"))
+with(subset(DE_gene3, adj.P.Val<0.05), points(logFC, log2p, pch=20, col="red"))
+with(subset(DE_gene3, rownames(DE_gene3) %in% Lit$V1 & adj.P.Val<0.05), points(logFC, log2p, pch=20, col="yellow"))
+with(subset(DE_gene3, adj.P.Val<0.05 & logFC<(-1.1)), textxy(logFC, log2p, labs=rownames(subset(DE_gene3, adj.P.Val<0.05 & logFC<(-1.1))), cex=0.5))
+legend(x="bottomleft", c("PCD differential gene expression", "Statistical significance", "Differentially expressed genes from FFPE tissus"), pch = 19, pt.cex = 1.5, cex = 0.7, col = c("black","red", "yellow"), lty=c(0,0), lwd=c(0,0), ncol = 1)
+
+```
+
+
+

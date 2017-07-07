@@ -1,0 +1,341 @@
+---
+title: "PCD differential analysis"
+author: "Clement Vialatte de Pemille"
+date: "22 juin 2017"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8) 
+```
+
+
+```{r, echo=F}
+setwd("/home/clement.vialatte/Documents/Analyses supplémentaires/R Markdown/")
+```
+
+```{r, echo=T}
+### Loading the expression set combining all the NonPCDs
+# Genes from the differential analysis between FFPE and FF samples from the literature have been removed (Esteve-Codina, Anna, Oriol Arpi, Maria Martinez-García, Estela Pineda, Mar Mallo, Marta Gut, Cristina Carrato, et al. “A Comparison of RNA-Seq Results from Paired Formalin-Fixed Paraffin-Embedded and Fresh-Frozen Glioblastoma Tissue Samples.” PloS One 12, no. 1 (2017): e0170632.)
+# NonPCD datasets for comparison are:
+#                                   N samples
+# TCGA = TCGA                         535
+# eset = GSE51373                     28
+# eset = GSE62873                     99
+# eset = GSE54807                     11
+# eset = GSE63553                     13
+# eset = GSE66957                     57
+# eset = GSE69207                     100
+
+# Total = 8 dataset                   843
+
+# Common genes in the datasets =      9938
+
+eset_compare<-read.table("eset_compare_all.txt", header = T, sep = "\t")
+dim(eset_compare)
+```
+
+```{r, echo=F}
+eset_compare<-as.matrix(eset_compare)
+```
+
+```{r, echo=T, message=F}
+### Normalization
+library(limma)
+eset_NbA<-normalizeBetweenArrays(eset_compare, 
+                                 method="cyclicloess", 
+                                 targets=NULL, 
+                                 cyclic.method="fast")
+```
+
+```{r, echo=F, message=F}
+library(ggbiplot)
+library(ggplot2)
+pheno_compare <- rep(1:8, c(12,535,28,99,11,13,57,100))
+pheno_compare<-as.factor(pheno_compare)
+levels(pheno_compare)<-c("PCD", "TCGA", "GSE51373", "GSE54807", "GSE62873", "GSE63553", "GSE66957", "GSE69207")
+```
+
+```{r, echo=T}
+### Analysing the matrix and the comparability
+
+# Principal Component Analysis
+pca <- prcomp(t(eset_compare), scale = TRUE, center = TRUE)
+g <- ggbiplot(pca, obs.scale = 1, var.scale = 0, 
+              groups = pheno_compare, ellipse = TRUE, 
+              circle = TRUE, var.axes = F, varname.size = 0.01, varname.abbrev = T)
+g <- g + scale_color_discrete(name = '')
+g <- g + theme(legend.direction = 'horizontal', 
+               legend.position = 'top')
+g<-g + ggtitle("PCA from the expression set", subtitle = "Merging of all dataset")
+print(g)
+```
+
+```{r, echo=F, message=F}
+library(robustbase)
+med_PCD<-rowMedians(eset_compare[,1:12])
+med_NonPCD<-rowMedians(eset_compare[,13:855])
+```
+
+```{r, echo=T}
+# Plotting median values
+plot(med_NonPCD, med_PCD, main="Median values across samples before normalization", xlab="Median values of non PCD sampes", ylab="Median values of PCD samples")
+```
+
+```{r, echo=F, message=F}
+med_PCD<-rowMedians(eset_NbA[,1:12])
+med_NonPCD<-rowMedians(eset_NbA[,13:855])
+```
+
+```{r, echo=T}
+plot(med_NonPCD, med_PCD, main="Median values across samples after normalization", xlab="Median values of non PCD sampes", ylab="Median values of PCD samples")
+```
+
+```{r, echo=F, message=F}
+eset_compare<-read.table("eset_compare_allgene.txt", header = T, sep = "\t")
+eset_compare<-as.matrix(eset_compare)
+eset_NbA<-normalizeBetweenArrays(eset_compare, 
+                                 method="cyclicloess", 
+                                 targets=NULL, 
+                                 cyclic.method="fast")
+```
+
+```{r, echo=T}
+### We have removed two datasets (GSE54807 and GSE62873) due to extreme variation and comparability issues
+dim(eset_compare)
+
+
+### Differential gene expression analysis
+
+# Make design
+PCD<-rep(0, 745)
+PCD<-as.data.frame(PCD)
+PCD[1:12,]<-1
+NonPCD<-rep(0, 745)
+NonPCD<-as.data.frame(NonPCD)
+NonPCD[13:745,]<-1
+design<-cbind(PCD, NonPCD)
+
+# Linear regression
+fit <- lmFit(eset_NbA, design)
+cont.matrix <- makeContrasts(PCDvsNonPCD=PCD-NonPCD, 
+                             levels=design)
+fit <- contrasts.fit(fit, cont.matrix)
+fit <- eBayes(fit)
+```
+
+```{r, echo=F, message=F}
+library(calibrate)
+setwd("/home/clement.vialatte/Documents/Arrayexrps/Pathway analysis 5 datasets/")
+Lit<-read.csv2("DEgene_FF_FFPE", header = F)
+DE_gene<-toptable(fit, number = "inf")
+DE_gene$log2p<-c(-(log2(DE_gene$adj.P.Val)))
+DE_gene2<-toptable(fit, number = "inf", p.value = 0.05)
+DE_gene2$log2p<-c(-(log2(DE_gene2$adj.P.Val)))
+CDR2L_related<-c("COL9A1", "FAM63B", "TTC30A", "KLF7", "TNC", "NTSR1", "ITIH3", "PVALB", "TCAP", "TPM1", "PLA2G5", "PTH1R", "C9", "P2RY2", "TP53I11", "ABCC6", "DNASE1L2", "GABRA6", "CTRB1", "RPSA", "ELAVL1", "TMP1", "CDR2", "BFSP2", "ZCCHC12", "PNMA5", "OTOP3", "HID1", "FADS6", "TMEM128", "OTOP2", "FGFR1OP2", "AP3D1", "AP3S2", "CDR2L")
+names<-rownames(DE_gene[1:15,])
+```
+
+```{r, echo=T}
+### Visualisation:
+```
+
+```{r, echo=F}
+with(DE_gene, plot(logFC, log2p, pch=20, main="Differential gene expression between PCD related and non PCD related ovarian tumor", xlab="Log Fold Change", ylab="-log2(p-value)"))
+with(subset(DE_gene, adj.P.Val<0.05 & logFC<(-1.1) | logFC>1.1), points(logFC, log2p, pch=20, col="red"))
+with(subset(DE_gene, rownames(DE_gene) %in% Lit$V1), points(logFC, log2p, pch=20, col="yellow"))
+with(subset(DE_gene, rownames(DE_gene) %in% CDR2L_related), points(logFC, log2p, pch=20, col="blue"))
+with(subset(DE_gene, rownames(DE_gene) == "CDR2L"), textxy(logFC, log2p, labs=rownames(subset(DE_gene,rownames(DE_gene) == "CDR2L" )), cex=0.7))
+with(subset(DE_gene, rownames(DE_gene) %in% names), textxy(logFC, log2p, labs=rownames(subset(DE_gene, rownames(DE_gene) %in% names)), cex=0.7))
+legend(x="topleft", c("PCD differential gene expression", "Statistical significance and |logFC| > 1.1", "Differentially expressed genes from FFPE tissues", "CDR2L related genes"), pch = 19, pt.cex = 1.5, cex = 0.7, col = c("black","red", "yellow", "blue"), lty=c(0,0), lwd=c(0,0), ncol = 1)
+```
+
+```{r, echo=T}
+### Visualization
+
+# Genes of interest
+    # GAS6
+```
+
+```{r, echo=F, message=F}
+Gene_med<-subset(eset_NbA, rownames(eset_NbA) == "GAS6")
+Gene_med2 <- Gene_med[order(Gene_med, decreasing = F)[13:745]] 
+Gene_med3<-Gene_med[1:12]
+Gene_med<-c(Gene_med3, Gene_med2)
+
+library(RColorBrewer)
+cols<-brewer.pal(n=6,name="Set1")
+pattern<-design[,1]
+pattern<-ifelse(pattern == "1", "PCD related ovarian carcinoma", "Non PCD ovarian carcinoma")
+pattern<-as.factor(pattern)
+cols_t2<-cols[pattern]
+
+plot(Gene_med, 
+     col=cols_t2, 
+     type = "h",
+     ylab = "Expression value (log2)",
+     xlab = "Dataset",
+     main = "GAS6 expression value across samples",
+     xlim = c(0,745))
+legend("top",
+       legend=levels(pattern),
+       col=cols,pch=rep(c(16,18),each=4),bty="n",ncol=2,cex=1,pt.cex=1.5)
+segments(111,8.7,-50,8.7)
+segments(111,8.7,111,0)
+abline(h = mean(Gene_med[13:745]), col="red", lwd=1, lty=2)
+abline(h = mean(Gene_med[1:12]), col="blue", lwd=1, lty=2)
+legend("topright", legend=c("Non PCD median value", "PCD median value"),
+       col=c("red", "blue"), lty=2, cex=1, box.lwd = 0.5, box.col = 1)
+arrows(111,5,740,5, length = 0.1, angle = 20, code = 3)
+text(420,5.3,labels = "87.5 %")
+text(550,9.4, labels = "p value <0.01, logFC 1.5", cex = 0.8)
+```
+
+```{r, echo=T}
+    # CDR2
+```
+
+```{r, echo=F, message=F}
+# CDR2
+eset_compare<-read.table("eset_compare_CDR2.txt", header = T, sep = "\t")
+eset_compare<-as.matrix(eset_compare)
+eset_NbA<-normalizeBetweenArrays(eset_compare, 
+                                 method="cyclicloess", 
+                                 targets=NULL, 
+                                 cyclic.method="fast")
+Gene_med<-subset(eset_NbA, rownames(eset_NbA) == "CDR2")
+Gene_med2 <- Gene_med[order(Gene_med, decreasing = F)[13:604]] 
+Gene_med3<-Gene_med[1:12]
+Gene_med<-c(Gene_med3, Gene_med2)
+
+plot(Gene_med, 
+     col=cols_t2, 
+     type = "h",
+     ylab = "Expression value (log2)",
+     xlab = "Dataset",
+     main = "CDR2 expression value across samples",
+     xlim = c(0,604))
+legend("top",
+       legend=levels(pattern),
+       col=cols,pch=rep(c(16,18),each=4),bty="n",ncol=2,cex=1,pt.cex=1.5)
+segments(204,5.9,-50,5.9)
+segments(204,5.9,204,0)
+abline(h = mean(Gene_med[13:604]), col="red", lwd=1, lty=2)
+abline(h = mean(Gene_med[1:12]), col="blue", lwd=1, lty=2)
+legend("topright", legend=c("Non PCD median value", "PCD median value"),
+       col=c("red", "blue"), lty=2, cex=1, box.lwd = 0.5, box.col = 1)
+arrows(204,5,604,5, length = 0.1, angle = 20, code = 3)
+text(420,5.3,labels = "69.7 %")
+text(50,8.2, labels = "p value <0.05, logFC -0.42", cex = 0.8)
+```
+
+```{r, echo=F, message=F}
+setwd("/home/clement.vialatte/Documents/Analyses supplémentaires/R Markdown/")
+eset_compare<-read.table("eset_compare_ID.txt", header = T, sep = "\t")
+fit <- lmFit(eset_compare, design)
+cont.matrix <- makeContrasts(PCDvsNonPCD=PCD-NonPCD, 
+                             levels=design)
+fit <- contrasts.fit(fit, cont.matrix)
+fit <- eBayes(fit)
+```
+
+```{r,echo=T}
+### Pathway analysis in R (using EntrezID)
+DE_GO<-goana(fit, 
+             coef = ncol(fit), 
+             geneid = rownames(fit), 
+             FDR = 0.05, 
+             trend = FALSE)
+dim(subset(DE_GO, DE_GO$P.Up<0.05))
+dim(subset(DE_GO, DE_GO$P.Down<0.05))
+```
+
+```{r, echo=T}
+# Visualization of GO terms
+```
+
+
+```{r, echo=F, message=F}
+GO_sum<-read.table("GO_sum.txt", header = T, sep = "\t")
+GO_sum_up<-subset(GO_sum, GO_sum$Up_regulated_bin == "Up")
+GO_sum_down<-subset(GO_sum, GO_sum$Up_regulated_bin == "Down")
+cols_t3<-cols[rev(as.factor(GO_sum$Up_regulated_bin))]
+
+gg<-ggplot(GO_sum_down, aes(x=p_value, y=X1, colour=Pathway)) + geom_point(aes(size = N), stroke=3, stat = "identity") + ylab("GO:term") + xlab("-log2(p-value)") + labs(title = "Down regulated GO terms", subtitle="From differential gene expression analysis, FDR<0.05")
+print(gg)
+
+gg<-ggplot(GO_sum_up, aes(x=p_value, y=X1, colour=Pathway)) + geom_point(aes(size = N), stroke=3, stat = "identity") + ylab("GO:term") + xlab("-log2(p-value)") + labs(title = "Up regulated GO terms", subtitle="From differential gene expression analysis, FDR<0.05")
+print(gg)
+```
+
+```{r, echo=T}
+# Visualization of protein-protein interaction network
+```
+
+```{r, echo=F, message=F}
+library(genefilter)
+fval <- kOverA(370, 5)
+flist <- filterfun(fval)
+mksub <- genefilter(eset_NbA, flist)
+eset_filtered <- eset_filtered[mksub,]
+```
+
+
+```{r, echo=F, message=F}
+library(dnet)
+
+org.Hs.string <- dRDataLoader(RData='org.Hs.string')
+
+ind <- match(V(org.Hs.string)$symbol, rownames(eset_filtered))
+esetGeneSub <- eset_filtered[ind[!is.na(ind)],]
+
+nodes_mapped <- V(org.Hs.string)$name[!is.na(ind)]
+network <- dNetInduce(g=org.Hs.string, nodes_query=nodes_mapped, knn=0, remove.loops=T, largest.comp=T)
+V(network)$name <- V(network)$symbol
+
+fit <- lmFit(eset_filtered, design)
+fit <- contrasts.fit(fit, cont.matrix)
+fit <- eBayes(fit)
+pvals<-as.matrix(fit$p.value)
+adjpvals <- sapply(1:ncol(pvals),function(x) {p.adjust(pvals[,x], method="BH")})
+colnames(adjpvals) <- colnames(pvals)
+
+apply(adjpvals<0.05, 2, sum)
+my_contrast <- "PCDvsNonPCD"
+pval <- pvals[,my_contrast]
+
+
+g <- dNetPipeline(g=network, pval=pval, nsize=20)
+
+glayout <- layout.fruchterman.reingold(g) 
+
+com <- walktrap.community(g, modularity=T)
+com <- spinglass.community(g, spins=25)
+com$csize <- sapply(1:length(com),function(x) sum(com$membership==x))
+vgroups <- com$membership
+colormap <- "bwr"
+palette.name <- visColormap(colormap=colormap)
+mcolors <- palette.name(length(com))
+vcolors <- mcolors[vgroups]
+com$significance <- dCommSignif(g, com)
+
+vdegrees <- igraph::degree(g)
+
+tmp <- data.frame(ind=1:vcount(g), vgroups, vdegrees)
+ordering <- tmp[order(vgroups,vdegrees),]$ind
+
+logFC <- fit$coefficients[V(g)$name,my_contrast]
+visNet(g, glayout=glayout, pattern=logFC, colormap=colormap, vertex.shape="circle", mark.groups=mark.groups, mark.col=mark.col, mark.border=mark.border, mark.shape=1, mark.expand=10, edge.color=edge.color)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
